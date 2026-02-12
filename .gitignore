@@ -426,3 +426,8 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Runtime-generated Kociemba cache
+kociemba_prune_cache_v1.bin
+kociemba_cache.bin
+kociemba_cache_v2.bin

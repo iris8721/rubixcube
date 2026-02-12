@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="rubixcube.vcxproj" />
+  <Project Path="rubixcube.vcxproj" Id="8f50e011-494b-48a0-ba40-a8bc3b8b1d55" />
 </Solution>
