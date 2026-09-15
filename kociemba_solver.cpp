@@ -381,7 +381,10 @@ int KociembaSolver::GetUdEdgePerm(const CubeState& state) {
 
 int KociembaSolver::GetSlicePerm(const CubeState& state) {
     int perm[4];
-    for (int i = 0; i < 4; i++) perm[i] = state.ep[8 + i] - 8;
+    for (int i = 0; i < 4; i++) {
+        if (!IsSliceEdge(state.ep[8 + i])) return 0;
+        perm[i] = state.ep[8 + i] - 8;
+    }
     return PermToIndex(perm, 4);
 }
 
@@ -488,7 +491,7 @@ void KociembaSolver::IndexToPerm(int index, int length, int* outPerm) {
 }
 
 int KociembaSolver::Binomial(int n, int k) {
-    if (k < 0 || k > n) return 0;
+    if (n < 0 || n > 12 || k < 0 || k > n) return 0;
 
     static const auto choose = [] {
         std::array<std::array<int, 13>, 13> table{};
