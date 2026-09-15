@@ -7,6 +7,7 @@
 #include <array>
 #include <cfloat>
 #include <cmath>
+#include <ctime>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -882,6 +883,7 @@ int main() {
 
     InitWindow(1920, 1080, "rubixcube");
     SetTargetFPS(60);
+    SetRandomSeed(static_cast<unsigned int>(std::time(nullptr)));
 
     state.font = GetFontDefault();
     if (FileExists("Roboto-Medium.ttf")) {
