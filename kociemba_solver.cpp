@@ -953,7 +953,7 @@ bool KociembaSolver::SearchPhase1(
 
         for (int phase2Depth = phase2LowerBound; phase2Depth <= 18; phase2Depth++) {
             ctx.phase2Path.clear();
-            if (SearchPhase2(tables, cornerPerm, udEdgePerm, slicePerm, phase2Depth, -1, ctx)) {
+            if (SearchPhase2(tables, cornerPerm, udEdgePerm, slicePerm, phase2Depth, lastFace, ctx)) {
                 std::vector<int> combined = ctx.phase1Path;
                 combined.insert(combined.end(), ctx.phase2Path.begin(), ctx.phase2Path.end());
                 ctx.solution = std::move(combined);
