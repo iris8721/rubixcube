@@ -67,9 +67,7 @@ struct AppState {
     Face animFace = UP;
     bool animCW = true;
     int animDir = 1;
-    cube::Move animMove = cube::QuarterTurn(UP, true);
     CubeModel cube;
-    cube::CubeState logicalState;
     std::unique_ptr<cube::ICubeSolver> solver;
     std::deque<cube::Move> moveQueue;
     std::vector<cube::Move> activeSolutionMoves;
@@ -80,12 +78,6 @@ struct AppState {
     std::string lastSolution;
     std::string validationStatus;
 };
-
-int NormalizeTurns(int turns) {
-    int normalized = turns % 4;
-    if (normalized < 0) normalized += 4;
-    return normalized;
-}
 
 Face FaceFromIndex(int faceIndex) {
     switch (faceIndex) {
@@ -281,7 +273,6 @@ void InitCube(CubeModel& cubeModel) {
 
 void ResetCube(AppState& state) {
     InitCube(state.cube);
-    state.logicalState.Reset();
     state.moveQueue.clear();
     state.activeSolutionMoves.clear();
     state.completedSolutionSteps = 0;
@@ -337,7 +328,7 @@ void ApplyRotation(CubeModel& cubeModel, Face face, bool clockwise) {
 }
 
 void ApplyMoveInstant(CubeModel& cubeModel, const cube::Move& move) {
-    int turns = NormalizeTurns(move.turns);
+    int turns = cube::NormalizeTurns(move.turns);
     if (turns == 0) return;
 
     if (turns == 3) {
@@ -355,19 +346,18 @@ void StartRotation(AppState& state, Face face, bool clockwise) {
     state.isAnimating = true;
     state.animFace = face;
     state.animCW = clockwise;
-    state.animMove = cube::QuarterTurn(face, clockwise);
     state.animDir = (GetFaceDir(face, clockwise) < 0.0f) ? -1 : 1;
     state.animAngle = 0.0f;
 }
 
 int AnimationQuarterTurnsForMove(const cube::Move& move) {
-    int turns = NormalizeTurns(move.turns);
+    int turns = cube::NormalizeTurns(move.turns);
     if (turns == 0) return 0;
     return (turns == 2) ? 2 : 1;
 }
 
 void EnqueueAnimatedMove(AppState& state, const cube::Move& move) {
-    int turns = NormalizeTurns(move.turns);
+    int turns = cube::NormalizeTurns(move.turns);
     if (turns == 0) return;
 
     if (turns == 3) {
@@ -418,7 +408,6 @@ void ScrambleCube(AppState& state) {
         bool clockwise = GetRandomValue(0, 1) == 1;
         cube::Move move = cube::QuarterTurn(face, clockwise);
         ApplyMoveInstant(state.cube, move);
-        state.logicalState.ApplyMove(move);
     }
 
     state.solverStatus = "Cube scrambled.";
@@ -444,10 +433,7 @@ int FindStickerColorAt(const CubeModel& cubeModel, int x, int y, int z, Face fac
     return -1;
 }
 
-bool BuildExplicitStateFromPaintedCube(
-    const CubeModel& cubeModel,
-    cube::KociembaSolver::ExplicitState& explicitState,
-    std::string& message) {
+bool ReadCubeState(const CubeModel& cubeModel, cube::CubeState& cubeState, std::string& message) {
     std::array<int, 6> colorCounts{};
 
     for (const Sticker& sticker : cubeModel.stickers) {
@@ -507,8 +493,8 @@ bool BuildExplicitStateFromPaintedCube(
             return false;
         }
 
-        explicitState.cp[cornerIndex] = piece;
-        explicitState.co[cornerIndex] = orientation % 3;
+        cubeState.cp[cornerIndex] = piece;
+        cubeState.co[cornerIndex] = orientation % 3;
     }
 
     for (size_t edgeIndex = 0; edgeIndex < EDGE_POSITIONS.size(); edgeIndex++) {
@@ -544,33 +530,22 @@ bool BuildExplicitStateFromPaintedCube(
             return false;
         }
 
-        explicitState.ep[edgeIndex] = piece;
-        explicitState.eo[edgeIndex] = orientation;
+        cubeState.ep[edgeIndex] = piece;
+        cubeState.eo[edgeIndex] = orientation;
     }
 
-    message = "Painted state captured.";
+    message = "Cube state captured.";
     return true;
 }
 
-bool ValidatePaintedCubeState(AppState& state, cube::KociembaSolver::ExplicitState& explicitState, std::string& message) {
-    auto* kociemba = dynamic_cast<cube::KociembaSolver*>(state.solver.get());
-    if (!kociemba) {
-        message = "Solver does not support painted-state validation.";
+bool ReadValidCubeState(const CubeModel& cubeModel, cube::CubeState& cubeState, std::string& message) {
+    if (!ReadCubeState(cubeModel, cubeState, message)) {
         return false;
     }
 
-    if (!BuildExplicitStateFromPaintedCube(state.cube, explicitState, message)) {
-        return false;
-    }
-
-    cube::KociembaSolver::ValidationResult validation = kociemba->ValidateExplicitState(explicitState);
-    if (!validation.valid) {
-        message = validation.message;
-        return false;
-    }
-
+    cube::ValidationResult validation = cube::ValidateCubeState(cubeState);
     message = validation.message;
-    return true;
+    return validation.valid;
 }
 
 void RequestSolve(AppState& state) {
@@ -579,36 +554,25 @@ void RequestSolve(AppState& state) {
         return;
     }
 
-    cube::SolveResult result;
-    if (state.paintMode) {
-        auto* kociemba = dynamic_cast<cube::KociembaSolver*>(state.solver.get());
-        if (!kociemba) {
-            state.solverStatus = "Solver does not support paint-state solving.";
-            return;
-        }
-
-        cube::KociembaSolver::ExplicitState explicitState;
-        std::string validationMessage;
-        if (!ValidatePaintedCubeState(state, explicitState, validationMessage)) {
-            state.validationStatus = validationMessage;
-            state.solverStatus = "Painted state is invalid.";
-            state.moveQueue.clear();
-            state.activeSolutionMoves.clear();
-            state.completedSolutionSteps = 0;
-            state.currentStepQuarterTurnsRemaining = 0;
-            state.solutionInProgress = false;
-            return;
-        }
-
+    cube::CubeState cubeState;
+    std::string validationMessage;
+    if (!ReadValidCubeState(state.cube, cubeState, validationMessage)) {
         state.validationStatus = validationMessage;
-        result = kociemba->SolveExplicitState(explicitState);
-    }
-    else {
-        // In normal play, trust the logical move-history state.
-        result = state.solver->Solve(state.logicalState);
+        state.solverStatus = "Painted state is invalid.";
+        state.moveQueue.clear();
+        state.activeSolutionMoves.clear();
+        state.completedSolutionSteps = 0;
+        state.currentStepQuarterTurnsRemaining = 0;
+        state.solutionInProgress = false;
+        return;
     }
 
-    if (state.paintMode) state.paintMode = false;
+    if (state.paintMode) {
+        state.validationStatus = validationMessage;
+        state.paintMode = false;
+    }
+
+    cube::SolveResult result = state.solver->Solve(cubeState);
 
     state.moveQueue.clear();
     state.activeSolutionMoves = result.moves;
@@ -1086,7 +1050,6 @@ int main() {
                 state.currentStepQuarterTurnsRemaining = 0;
                 state.solutionInProgress = false;
                 state.moveQueue.clear();
-                state.logicalState.Reset();
             }
         }
         if (toggleCubiesRequested) state.showCubies = !state.showCubies;
@@ -1100,9 +1063,9 @@ int main() {
         }
 
         if (idle && state.paintMode && validateRequested) {
-            cube::KociembaSolver::ExplicitState explicitState;
+            cube::CubeState cubeState;
             std::string validationMessage;
-            if (ValidatePaintedCubeState(state, explicitState, validationMessage)) {
+            if (ReadValidCubeState(state.cube, cubeState, validationMessage)) {
                 state.validationStatus = validationMessage;
                 state.solverStatus = "Painted state is valid.";
             }
@@ -1172,7 +1135,6 @@ int main() {
             state.animAngle += GetFrameTime() * ANIM_SPEED * 90.0f;
             if (state.animAngle >= 90) {
                 ApplyRotation(state.cube, state.animFace, state.animCW);
-                state.logicalState.ApplyMove(state.animMove);
                 state.isAnimating = false;
                 state.animAngle = 0;
 
@@ -1189,7 +1151,6 @@ int main() {
                     state.moveQueue.empty() &&
                     state.completedSolutionSteps >= static_cast<int>(state.activeSolutionMoves.size())) {
                     state.solutionInProgress = false;
-                    state.logicalState.Reset();
                     state.solverStatus = "Cube solved.";
                     state.lastSolution.clear();
                 }

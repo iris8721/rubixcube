@@ -11,32 +11,11 @@ namespace cube {
 
 class KociembaSolver final : public ICubeSolver {
 public:
-    struct ExplicitState {
-        std::array<int, 8> cp{};
-        std::array<int, 8> co{};
-        std::array<int, 12> ep{};
-        std::array<int, 12> eo{};
-    };
-
-    struct ValidationResult {
-        bool valid = false;
-        std::string message;
-    };
-
     SolveResult Solve(const CubeState& state) override;
     const char* Name() const override;
     std::string LastDebugInfo() const override;
-    ValidationResult ValidateExplicitState(const ExplicitState& state) const;
-    SolveResult SolveExplicitState(const ExplicitState& state);
 
 private:
-    struct CubieCube {
-        std::array<int, 8> cp{};
-        std::array<int, 8> co{};
-        std::array<int, 12> ep{};
-        std::array<int, 12> eo{};
-    };
-
     struct Tables {
         bool initialized = false;
         std::array<std::array<std::uint16_t, 18>, 2187> twistMove{};
@@ -61,48 +40,34 @@ private:
         int foundPhase2Depth = -1;
     };
 
-    struct CoordinateState {
-        CubieCube cubie;
-        int twist = 0;
-        int flip = 0;
-        int slice = 0;
-        int cornerPerm = 0;
-        int udEdgePerm = 0;
-        int slicePerm = 0;
-    };
-
     static Tables& GetTables();
     static void InitializeTables(Tables& tables);
 
-    static CubieCube SolvedCubieCube();
-    static CubieCube MoveCubeQuarter(Face face);
-    static CubieCube Compose(const CubieCube& state, const CubieCube& move);
-    static const std::array<CubieCube, 18>& MoveCubes18();
+    static CubeState MoveCubeQuarter(Face face);
+    static CubeState Compose(const CubeState& state, const CubeState& move);
+    static const std::array<CubeState, 18>& MoveCubes18();
     static const std::array<int, 10>& Phase2Moves18();
-    static void ApplyMove(CubieCube& state, int move18);
+    static void ApplyMove(CubeState& state, int move18);
     static int Move18(Face face, int turnQuarter);
     static Face FaceFromMove18(int move18);
     static int TurnFromMove18(int move18);
     static int AxisFromFace(Face face);
     static Move MoveFromMove18(int move18);
 
-    static CoordinateState BuildCoordinateState(const CubeState& state);
-    static CoordinateState BuildCoordinateState(const ExplicitState& state);
-    static bool IsSolvedCubie(const CubieCube& state);
-    static int GetTwist(const CubieCube& state);
-    static int GetFlip(const CubieCube& state);
-    static int GetSlice(const CubieCube& state);
+    static int GetTwist(const CubeState& state);
+    static int GetFlip(const CubeState& state);
+    static int GetSlice(const CubeState& state);
     static int SolvedSliceCoordinate();
-    static int GetCornerPerm(const CubieCube& state);
-    static int GetUdEdgePerm(const CubieCube& state);
-    static int GetSlicePerm(const CubieCube& state);
+    static int GetCornerPerm(const CubeState& state);
+    static int GetUdEdgePerm(const CubeState& state);
+    static int GetSlicePerm(const CubeState& state);
 
-    static void SetTwist(CubieCube& state, int twist);
-    static void SetFlip(CubieCube& state, int flip);
-    static void SetSlice(CubieCube& state, int slice);
-    static void SetCornerPerm(CubieCube& state, int cornerPerm);
-    static void SetUdEdgePerm(CubieCube& state, int udEdgePerm);
-    static void SetSlicePerm(CubieCube& state, int slicePerm);
+    static void SetTwist(CubeState& state, int twist);
+    static void SetFlip(CubeState& state, int flip);
+    static void SetSlice(CubeState& state, int slice);
+    static void SetCornerPerm(CubeState& state, int cornerPerm);
+    static void SetUdEdgePerm(CubeState& state, int udEdgePerm);
+    static void SetSlicePerm(CubeState& state, int slicePerm);
 
     static int PermToIndex(const int* perm, int length);
     static void IndexToPerm(int index, int length, int* outPerm);
@@ -125,7 +90,7 @@ private:
 
     static bool SearchPhase1(
         const Tables& tables,
-        const CubieCube& currentState,
+        const CubeState& currentState,
         int twist,
         int flip,
         int slice,
@@ -134,17 +99,11 @@ private:
         SearchContext& ctx);
 
     static std::optional<MoveSequence> SolveTwoPhase(
-        const CubeState& state,
+        const CubeState& initial,
         std::string& statusMessage,
         SearchContext& ctx);
-    static std::optional<MoveSequence> SolveTwoPhase(
-        const CoordinateState& initial,
-        std::string& statusMessage,
-        SearchContext& ctx);
-    static MoveSequence SolveByInverseHistory(const CubeState& state);
 
     std::string lastStatusMessage_;
-    bool lastUsedFallback_ = false;
     double lastSolveMs_ = 0.0;
     int lastSolutionLength_ = 0;
     int lastPhase1Depth_ = -1;

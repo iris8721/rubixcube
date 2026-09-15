@@ -44,12 +44,6 @@ struct TableInitStats {
     double initMs = 0.0;
 };
 
-int NormalizeTurns(int turns) {
-    int normalized = turns % 4;
-    if (normalized < 0) normalized += 4;
-    return normalized;
-}
-
 TableInitStats& GetTableInitStats() {
     static TableInitStats stats;
     return stats;
@@ -78,29 +72,6 @@ std::string CompactCount(std::uint64_t value) {
     return out.str();
 }
 
-template <size_t N>
-bool AllValuesInRangeUnique(const std::array<int, N>& values, int minValue, int maxValue) {
-    std::vector<bool> seen(static_cast<size_t>(maxValue - minValue + 1), false);
-    for (int value : values) {
-        if (value < minValue || value > maxValue) return false;
-        size_t index = static_cast<size_t>(value - minValue);
-        if (seen[index]) return false;
-        seen[index] = true;
-    }
-    return true;
-}
-
-template <size_t N>
-int PermutationParity(const std::array<int, N>& values) {
-    int parity = 0;
-    for (size_t i = 0; i < N; i++) {
-        for (size_t j = i + 1; j < N; j++) {
-            if (values[i] > values[j]) parity ^= 1;
-        }
-    }
-    return parity;
-}
-
 bool WriteBytes(std::ofstream& out, const void* data, std::size_t size) {
     out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
     return out.good();
@@ -120,47 +91,12 @@ SolveResult KociembaSolver::Solve(const CubeState& state) {
     SolveResult result;
     SearchContext context;
 
-    if (state.IsSolved()) {
-        result.message = "Cube is already solved.";
-        lastUsedFallback_ = false;
-        lastStatusMessage_ = result.message;
-        lastSolveMs_ = 0.0;
-        lastSolutionLength_ = 0;
-        lastPhase1Depth_ = 0;
-        lastPhase2Depth_ = 0;
-        lastPhase1Nodes_ = 0;
-        lastPhase2Nodes_ = 0;
-        return result;
-    }
-
     std::string statusMessage;
     std::optional<MoveSequence> twoPhase = SolveTwoPhase(state, statusMessage, context);
-    if (twoPhase) {
-        result.moves = *twoPhase;
-        result.message = statusMessage;
-        lastUsedFallback_ = false;
-        lastStatusMessage_ = statusMessage;
-        lastSolutionLength_ = static_cast<int>(result.moves.size());
-        lastPhase1Depth_ = context.foundPhase1Depth;
-        lastPhase2Depth_ = context.foundPhase2Depth;
-        lastPhase1Nodes_ = context.phase1Nodes;
-        lastPhase2Nodes_ = context.phase2Nodes;
-        auto solveEnd = std::chrono::steady_clock::now();
-        lastSolveMs_ = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
-        return result;
-    }
+    if (twoPhase) result.moves = *twoPhase;
+    result.message = statusMessage;
 
-    result.moves = SolveByInverseHistory(state);
-    result.usedFallback = true;
-    if (!statusMessage.empty()) {
-        result.message = statusMessage + " Falling back to inverse-history solve.";
-    }
-    else {
-        result.message = "Falling back to inverse-history solve.";
-    }
-
-    lastUsedFallback_ = true;
-    lastStatusMessage_ = result.message;
+    lastStatusMessage_ = statusMessage;
     lastSolutionLength_ = static_cast<int>(result.moves.size());
     lastPhase1Depth_ = context.foundPhase1Depth;
     lastPhase2Depth_ = context.foundPhase2Depth;
@@ -213,119 +149,10 @@ std::string KociembaSolver::LastDebugInfo() const {
 
     text << "Nodes: p1 " << CompactCount(lastPhase1Nodes_)
          << " | p2 " << CompactCount(lastPhase2Nodes_);
-    if (lastUsedFallback_) {
-        text << " | fallback";
-    }
-    else {
-        text << " | fallback:no";
-    }
     text << "\n";
 
     text << "Status: " << (lastStatusMessage_.empty() ? "n/a" : lastStatusMessage_);
     return text.str();
-}
-
-KociembaSolver::ValidationResult KociembaSolver::ValidateExplicitState(const ExplicitState& state) const {
-    ValidationResult result;
-
-    if (!AllValuesInRangeUnique(state.cp, 0, 7)) {
-        result.message = "Invalid corner permutation.";
-        return result;
-    }
-    if (!AllValuesInRangeUnique(state.ep, 0, 11)) {
-        result.message = "Invalid edge permutation.";
-        return result;
-    }
-
-    int cornerOrientationSum = 0;
-    for (int value : state.co) {
-        if (value < 0 || value > 2) {
-            result.message = "Invalid corner orientation.";
-            return result;
-        }
-        cornerOrientationSum += value;
-    }
-    if (cornerOrientationSum % 3 != 0) {
-        result.message = "Corner orientation sum is invalid.";
-        return result;
-    }
-
-    int edgeOrientationSum = 0;
-    for (int value : state.eo) {
-        if (value < 0 || value > 1) {
-            result.message = "Invalid edge orientation.";
-            return result;
-        }
-        edgeOrientationSum += value;
-    }
-    if (edgeOrientationSum % 2 != 0) {
-        result.message = "Edge orientation sum is invalid.";
-        return result;
-    }
-
-    if (PermutationParity(state.cp) != PermutationParity(state.ep)) {
-        result.message = "Corner/edge permutation parity mismatch.";
-        return result;
-    }
-
-    result.valid = true;
-    result.message = "Cube state is valid.";
-    return result;
-}
-
-SolveResult KociembaSolver::SolveExplicitState(const ExplicitState& state) {
-    auto solveStart = std::chrono::steady_clock::now();
-    SolveResult result;
-    SearchContext context;
-
-    ValidationResult validation = ValidateExplicitState(state);
-    if (!validation.valid) {
-        result.usedFallback = true;
-        result.message = validation.message;
-
-        lastUsedFallback_ = true;
-        lastStatusMessage_ = validation.message;
-        lastSolveMs_ = 0.0;
-        lastSolutionLength_ = 0;
-        lastPhase1Depth_ = -1;
-        lastPhase2Depth_ = -1;
-        lastPhase1Nodes_ = 0;
-        lastPhase2Nodes_ = 0;
-        return result;
-    }
-
-    std::string statusMessage;
-    CoordinateState initial = BuildCoordinateState(state);
-    std::optional<MoveSequence> twoPhase = SolveTwoPhase(initial, statusMessage, context);
-    if (twoPhase) {
-        result.moves = *twoPhase;
-        result.message = statusMessage;
-
-        lastUsedFallback_ = false;
-        lastStatusMessage_ = statusMessage;
-        lastSolutionLength_ = static_cast<int>(result.moves.size());
-        lastPhase1Depth_ = context.foundPhase1Depth;
-        lastPhase2Depth_ = context.foundPhase2Depth;
-        lastPhase1Nodes_ = context.phase1Nodes;
-        lastPhase2Nodes_ = context.phase2Nodes;
-        auto solveEnd = std::chrono::steady_clock::now();
-        lastSolveMs_ = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
-        return result;
-    }
-
-    result.usedFallback = true;
-    result.message = !statusMessage.empty() ? statusMessage : "Unable to solve provided explicit state.";
-
-    lastUsedFallback_ = true;
-    lastStatusMessage_ = result.message;
-    lastSolutionLength_ = 0;
-    lastPhase1Depth_ = context.foundPhase1Depth;
-    lastPhase2Depth_ = context.foundPhase2Depth;
-    lastPhase1Nodes_ = context.phase1Nodes;
-    lastPhase2Nodes_ = context.phase2Nodes;
-    auto solveEnd = std::chrono::steady_clock::now();
-    lastSolveMs_ = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
-    return result;
 }
 
 KociembaSolver::Tables& KociembaSolver::GetTables() {
@@ -372,21 +199,8 @@ void KociembaSolver::InitializeTables(Tables& tables) {
     tables.initialized = true;
 }
 
-KociembaSolver::CubieCube KociembaSolver::SolvedCubieCube() {
-    CubieCube cube;
-    for (int i = 0; i < 8; i++) {
-        cube.cp[i] = i;
-        cube.co[i] = 0;
-    }
-    for (int i = 0; i < 12; i++) {
-        cube.ep[i] = i;
-        cube.eo[i] = 0;
-    }
-    return cube;
-}
-
-KociembaSolver::CubieCube KociembaSolver::MoveCubeQuarter(Face face) {
-    CubieCube move = SolvedCubieCube();
+CubeState KociembaSolver::MoveCubeQuarter(Face face) {
+    CubeState move = SolvedCubeState();
 
     switch (face) {
     case Face::U:
@@ -424,8 +238,8 @@ KociembaSolver::CubieCube KociembaSolver::MoveCubeQuarter(Face face) {
     return move;
 }
 
-KociembaSolver::CubieCube KociembaSolver::Compose(const CubieCube& state, const CubieCube& move) {
-    CubieCube result;
+CubeState KociembaSolver::Compose(const CubeState& state, const CubeState& move) {
+    CubeState result;
 
     for (int i = 0; i < 8; i++) {
         result.cp[i] = state.cp[move.cp[i]];
@@ -440,14 +254,14 @@ KociembaSolver::CubieCube KociembaSolver::Compose(const CubieCube& state, const 
     return result;
 }
 
-const std::array<KociembaSolver::CubieCube, 18>& KociembaSolver::MoveCubes18() {
-    static const std::array<CubieCube, 18> cubes = [] {
-        std::array<CubieCube, 18> moves{};
+const std::array<CubeState, 18>& KociembaSolver::MoveCubes18() {
+    static const std::array<CubeState, 18> cubes = [] {
+        std::array<CubeState, 18> moves{};
         for (int faceIndex = 0; faceIndex < 6; faceIndex++) {
             Face face = static_cast<Face>(faceIndex);
-            CubieCube quarter = MoveCubeQuarter(face);
-            CubieCube half = Compose(quarter, quarter);
-            CubieCube inverse = Compose(half, quarter);
+            CubeState quarter = MoveCubeQuarter(face);
+            CubeState half = Compose(quarter, quarter);
+            CubeState inverse = Compose(half, quarter);
 
             moves[Move18(face, 1)] = quarter;
             moves[Move18(face, 2)] = half;
@@ -468,7 +282,7 @@ const std::array<int, 10>& KociembaSolver::Phase2Moves18() {
     return moves;
 }
 
-void KociembaSolver::ApplyMove(CubieCube& state, int move18) {
+void KociembaSolver::ApplyMove(CubeState& state, int move18) {
     state = Compose(state, MoveCubes18()[move18]);
 }
 
@@ -503,57 +317,7 @@ Move KociembaSolver::MoveFromMove18(int move18) {
     return { FaceFromMove18(move18), TurnFromMove18(move18) };
 }
 
-KociembaSolver::CoordinateState KociembaSolver::BuildCoordinateState(const CubeState& state) {
-    CoordinateState coord;
-    coord.cubie = SolvedCubieCube();
-
-    for (const Move& move : state.ReducedHistory()) {
-        int turns = NormalizeTurns(move.turns);
-        if (turns == 0) continue;
-        ApplyMove(coord.cubie, Move18(move.face, turns));
-    }
-
-    coord.twist = GetTwist(coord.cubie);
-    coord.flip = GetFlip(coord.cubie);
-    coord.slice = GetSlice(coord.cubie);
-    coord.cornerPerm = GetCornerPerm(coord.cubie);
-    coord.udEdgePerm = GetUdEdgePerm(coord.cubie);
-    coord.slicePerm = GetSlicePerm(coord.cubie);
-    return coord;
-}
-
-KociembaSolver::CoordinateState KociembaSolver::BuildCoordinateState(const ExplicitState& state) {
-    CoordinateState coord;
-
-    for (int i = 0; i < 8; i++) {
-        coord.cubie.cp[i] = state.cp[i];
-        coord.cubie.co[i] = state.co[i];
-    }
-    for (int i = 0; i < 12; i++) {
-        coord.cubie.ep[i] = state.ep[i];
-        coord.cubie.eo[i] = state.eo[i];
-    }
-
-    coord.twist = GetTwist(coord.cubie);
-    coord.flip = GetFlip(coord.cubie);
-    coord.slice = GetSlice(coord.cubie);
-    coord.cornerPerm = GetCornerPerm(coord.cubie);
-    coord.udEdgePerm = GetUdEdgePerm(coord.cubie);
-    coord.slicePerm = GetSlicePerm(coord.cubie);
-    return coord;
-}
-
-bool KociembaSolver::IsSolvedCubie(const CubieCube& state) {
-    for (int i = 0; i < 8; i++) {
-        if (state.cp[i] != i || state.co[i] != 0) return false;
-    }
-    for (int i = 0; i < 12; i++) {
-        if (state.ep[i] != i || state.eo[i] != 0) return false;
-    }
-    return true;
-}
-
-int KociembaSolver::GetTwist(const CubieCube& state) {
+int KociembaSolver::GetTwist(const CubeState& state) {
     int twist = 0;
     for (int i = 0; i < 7; i++) {
         twist = twist * 3 + state.co[i];
@@ -561,7 +325,7 @@ int KociembaSolver::GetTwist(const CubieCube& state) {
     return twist;
 }
 
-int KociembaSolver::GetFlip(const CubieCube& state) {
+int KociembaSolver::GetFlip(const CubeState& state) {
     int flip = 0;
     for (int i = 0; i < 11; i++) {
         flip = flip * 2 + state.eo[i];
@@ -569,7 +333,7 @@ int KociembaSolver::GetFlip(const CubieCube& state) {
     return flip;
 }
 
-int KociembaSolver::GetSlice(const CubieCube& state) {
+int KociembaSolver::GetSlice(const CubeState& state) {
     int slice = 0;
     int r = 4;
     for (int position = 11; position >= 0 && r > 0; position--) {
@@ -582,29 +346,29 @@ int KociembaSolver::GetSlice(const CubieCube& state) {
 }
 
 int KociembaSolver::SolvedSliceCoordinate() {
-    static const int solvedSlice = GetSlice(SolvedCubieCube());
+    static const int solvedSlice = GetSlice(SolvedCubeState());
     return solvedSlice;
 }
 
-int KociembaSolver::GetCornerPerm(const CubieCube& state) {
+int KociembaSolver::GetCornerPerm(const CubeState& state) {
     int perm[8];
     for (int i = 0; i < 8; i++) perm[i] = state.cp[i];
     return PermToIndex(perm, 8);
 }
 
-int KociembaSolver::GetUdEdgePerm(const CubieCube& state) {
+int KociembaSolver::GetUdEdgePerm(const CubeState& state) {
     int perm[8];
     for (int i = 0; i < 8; i++) perm[i] = state.ep[i];
     return PermToIndex(perm, 8);
 }
 
-int KociembaSolver::GetSlicePerm(const CubieCube& state) {
+int KociembaSolver::GetSlicePerm(const CubeState& state) {
     int perm[4];
     for (int i = 0; i < 4; i++) perm[i] = state.ep[8 + i] - 8;
     return PermToIndex(perm, 4);
 }
 
-void KociembaSolver::SetTwist(CubieCube& state, int twist) {
+void KociembaSolver::SetTwist(CubeState& state, int twist) {
     int sum = 0;
     for (int i = 6; i >= 0; i--) {
         state.co[i] = twist % 3;
@@ -614,7 +378,7 @@ void KociembaSolver::SetTwist(CubieCube& state, int twist) {
     state.co[7] = (3 - (sum % 3)) % 3;
 }
 
-void KociembaSolver::SetFlip(CubieCube& state, int flip) {
+void KociembaSolver::SetFlip(CubeState& state, int flip) {
     int sum = 0;
     for (int i = 10; i >= 0; i--) {
         state.eo[i] = flip % 2;
@@ -624,7 +388,7 @@ void KociembaSolver::SetFlip(CubieCube& state, int flip) {
     state.eo[11] = (2 - (sum % 2)) % 2;
 }
 
-void KociembaSolver::SetSlice(CubieCube& state, int slice) {
+void KociembaSolver::SetSlice(CubeState& state, int slice) {
     state.ep.fill(-1);
     int remaining = slice;
     int r = 4;
@@ -646,20 +410,20 @@ void KociembaSolver::SetSlice(CubieCube& state, int slice) {
     }
 }
 
-void KociembaSolver::SetCornerPerm(CubieCube& state, int cornerPerm) {
+void KociembaSolver::SetCornerPerm(CubeState& state, int cornerPerm) {
     int perm[8];
     IndexToPerm(cornerPerm, 8, perm);
     for (int i = 0; i < 8; i++) state.cp[i] = perm[i];
 }
 
-void KociembaSolver::SetUdEdgePerm(CubieCube& state, int udEdgePerm) {
+void KociembaSolver::SetUdEdgePerm(CubeState& state, int udEdgePerm) {
     int perm[8];
     IndexToPerm(udEdgePerm, 8, perm);
     for (int i = 0; i < 8; i++) state.ep[i] = perm[i];
     for (int i = 8; i < 12; i++) state.ep[i] = i;
 }
 
-void KociembaSolver::SetSlicePerm(CubieCube& state, int slicePerm) {
+void KociembaSolver::SetSlicePerm(CubeState& state, int slicePerm) {
     int perm[4];
     IndexToPerm(slicePerm, 4, perm);
     for (int i = 0; i < 8; i++) state.ep[i] = i;
@@ -730,30 +494,30 @@ bool KociembaSolver::IsSliceEdge(int edgePiece) {
 
 void KociembaSolver::BuildMoveTables(Tables& tables) {
     for (int twist = 0; twist < 2187; twist++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetTwist(base, twist);
         for (int move = 0; move < 18; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, move);
             tables.twistMove[twist][move] = static_cast<std::uint16_t>(GetTwist(next));
         }
     }
 
     for (int flip = 0; flip < 2048; flip++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetFlip(base, flip);
         for (int move = 0; move < 18; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, move);
             tables.flipMove[flip][move] = static_cast<std::uint16_t>(GetFlip(next));
         }
     }
 
     for (int slice = 0; slice < 495; slice++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetSlice(base, slice);
         for (int move = 0; move < 18; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, move);
             tables.sliceMove[slice][move] = static_cast<std::uint16_t>(GetSlice(next));
         }
@@ -762,30 +526,30 @@ void KociembaSolver::BuildMoveTables(Tables& tables) {
     const std::array<int, 10>& phase2Moves = Phase2Moves18();
 
     for (int cornerPerm = 0; cornerPerm < 40320; cornerPerm++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetCornerPerm(base, cornerPerm);
         for (int move = 0; move < 10; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, phase2Moves[move]);
             tables.cornerPermMove[cornerPerm][move] = static_cast<std::uint16_t>(GetCornerPerm(next));
         }
     }
 
     for (int edgePerm = 0; edgePerm < 40320; edgePerm++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetUdEdgePerm(base, edgePerm);
         for (int move = 0; move < 10; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, phase2Moves[move]);
             tables.udEdgePermMove[edgePerm][move] = static_cast<std::uint16_t>(GetUdEdgePerm(next));
         }
     }
 
     for (int slicePerm = 0; slicePerm < 24; slicePerm++) {
-        CubieCube base = SolvedCubieCube();
+        CubeState base = SolvedCubeState();
         SetSlicePerm(base, slicePerm);
         for (int move = 0; move < 10; move++) {
-            CubieCube next = base;
+            CubeState next = base;
             ApplyMove(next, phase2Moves[move]);
             tables.slicePermMove[slicePerm][move] = static_cast<std::uint16_t>(GetSlicePerm(next));
         }
@@ -1121,7 +885,7 @@ bool KociembaSolver::SearchPhase2(
 
 bool KociembaSolver::SearchPhase1(
     const Tables& tables,
-    const CubieCube& currentState,
+    const CubeState& currentState,
     int twist,
     int flip,
     int slice,
@@ -1175,7 +939,7 @@ bool KociembaSolver::SearchPhase1(
         int nextFlip = tables.flipMove[flip][move18];
         int nextSlice = tables.sliceMove[slice][move18];
 
-        CubieCube nextState = currentState;
+        CubeState nextState = currentState;
         ApplyMove(nextState, move18);
 
         ctx.phase1Path.push_back(move18);
@@ -1197,27 +961,25 @@ bool KociembaSolver::SearchPhase1(
 }
 
 std::optional<MoveSequence> KociembaSolver::SolveTwoPhase(
-    const CubeState& state,
-    std::string& statusMessage,
-    SearchContext& ctx) {
-    CoordinateState initial = BuildCoordinateState(state);
-    return SolveTwoPhase(initial, statusMessage, ctx);
-}
-
-std::optional<MoveSequence> KociembaSolver::SolveTwoPhase(
-    const CoordinateState& initial,
+    const CubeState& initial,
     std::string& statusMessage,
     SearchContext& ctx) {
     const Tables& tables = GetTables();
 
-    if (IsSolvedCubie(initial.cubie)) {
+    if (IsSolved(initial)) {
         statusMessage = "Cube is already solved.";
+        ctx.foundPhase1Depth = 0;
+        ctx.foundPhase2Depth = 0;
         return MoveSequence{};
     }
 
+    int twist = GetTwist(initial);
+    int flip = GetFlip(initial);
+    int slice = GetSlice(initial);
+
     int phase1LowerBound = std::max(
-        tables.phase1TwistSlicePrune[initial.twist * 495 + initial.slice],
-        tables.phase1FlipSlicePrune[initial.flip * 495 + initial.slice]);
+        tables.phase1TwistSlicePrune[twist * 495 + slice],
+        tables.phase1FlipSlicePrune[flip * 495 + slice]);
 
     for (int phase1Depth = phase1LowerBound; phase1Depth <= 12; phase1Depth++) {
         ctx.phase1Path.clear();
@@ -1226,15 +988,7 @@ std::optional<MoveSequence> KociembaSolver::SolveTwoPhase(
         ctx.foundPhase1Depth = -1;
         ctx.foundPhase2Depth = -1;
 
-        if (SearchPhase1(
-            tables,
-            initial.cubie,
-            initial.twist,
-            initial.flip,
-            initial.slice,
-            phase1Depth,
-            -1,
-            ctx)) {
+        if (SearchPhase1(tables, initial, twist, flip, slice, phase1Depth, -1, ctx)) {
             ctx.foundPhase1Depth = phase1Depth;
             MoveSequence solution;
             solution.reserve(ctx.solution->size());
@@ -1248,19 +1002,6 @@ std::optional<MoveSequence> KociembaSolver::SolveTwoPhase(
 
     statusMessage = "Kociemba search exceeded configured depth limits.";
     return std::nullopt;
-}
-
-MoveSequence KociembaSolver::SolveByInverseHistory(const CubeState& state) {
-    const MoveSequence& history = state.ReducedHistory();
-
-    MoveSequence inverse;
-    inverse.reserve(history.size());
-
-    for (auto it = history.rbegin(); it != history.rend(); ++it) {
-        inverse.push_back(InverseMove(*it));
-    }
-
-    return inverse;
 }
 
 } // namespace cube

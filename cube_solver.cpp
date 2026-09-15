@@ -4,12 +4,6 @@
 
 namespace {
 
-int NormalizeTurns(int turns) {
-    int normalized = turns % 4;
-    if (normalized < 0) normalized += 4;
-    return normalized;
-}
-
 char FaceToChar(cube::Face face) {
     switch (face) {
     case cube::Face::U: return 'U';
@@ -22,9 +16,38 @@ char FaceToChar(cube::Face face) {
     return '?';
 }
 
+template <size_t N>
+bool AllValuesInRangeUnique(const std::array<int, N>& values, int minValue, int maxValue) {
+    std::vector<bool> seen(static_cast<size_t>(maxValue - minValue + 1), false);
+    for (int value : values) {
+        if (value < minValue || value > maxValue) return false;
+        size_t index = static_cast<size_t>(value - minValue);
+        if (seen[index]) return false;
+        seen[index] = true;
+    }
+    return true;
+}
+
+template <size_t N>
+int PermutationParity(const std::array<int, N>& values) {
+    int parity = 0;
+    for (size_t i = 0; i < N; i++) {
+        for (size_t j = i + 1; j < N; j++) {
+            if (values[i] > values[j]) parity ^= 1;
+        }
+    }
+    return parity;
+}
+
 } // namespace
 
 namespace cube {
+
+int NormalizeTurns(int turns) {
+    int normalized = turns % 4;
+    if (normalized < 0) normalized += 4;
+    return normalized;
+}
 
 Move QuarterTurn(Face face, bool clockwise) {
     return { face, clockwise ? 1 : 3 };
@@ -32,12 +55,6 @@ Move QuarterTurn(Face face, bool clockwise) {
 
 bool IsClockwiseQuarter(const Move& move) {
     return NormalizeTurns(move.turns) == 1;
-}
-
-Move InverseMove(const Move& move) {
-    int turns = NormalizeTurns(move.turns);
-    if (turns == 0) return { move.face, 0 };
-    return { move.face, 4 - turns };
 }
 
 std::string MoveToNotation(const Move& move) {
@@ -66,36 +83,75 @@ std::string MoveSequenceToString(const MoveSequence& moves) {
     return output.str();
 }
 
-void CubeState::Reset() {
-    reducedHistory_.clear();
+CubeState SolvedCubeState() {
+    CubeState state;
+    for (int i = 0; i < 8; i++) {
+        state.cp[i] = i;
+        state.co[i] = 0;
+    }
+    for (int i = 0; i < 12; i++) {
+        state.ep[i] = i;
+        state.eo[i] = 0;
+    }
+    return state;
 }
 
-void CubeState::ApplyMove(const Move& move) {
-    int turns = NormalizeTurns(move.turns);
-    if (turns == 0) return;
+bool IsSolved(const CubeState& state) {
+    for (int i = 0; i < 8; i++) {
+        if (state.cp[i] != i || state.co[i] != 0) return false;
+    }
+    for (int i = 0; i < 12; i++) {
+        if (state.ep[i] != i || state.eo[i] != 0) return false;
+    }
+    return true;
+}
 
-    Move normalized = { move.face, turns };
+ValidationResult ValidateCubeState(const CubeState& state) {
+    ValidationResult result;
 
-    if (!reducedHistory_.empty() && reducedHistory_.back().face == normalized.face) {
-        int combined = NormalizeTurns(reducedHistory_.back().turns + normalized.turns);
-        if (combined == 0) {
-            reducedHistory_.pop_back();
-        }
-        else {
-            reducedHistory_.back().turns = combined;
-        }
-        return;
+    if (!AllValuesInRangeUnique(state.cp, 0, 7)) {
+        result.message = "Invalid corner permutation.";
+        return result;
+    }
+    if (!AllValuesInRangeUnique(state.ep, 0, 11)) {
+        result.message = "Invalid edge permutation.";
+        return result;
     }
 
-    reducedHistory_.push_back(normalized);
-}
+    int cornerOrientationSum = 0;
+    for (int value : state.co) {
+        if (value < 0 || value > 2) {
+            result.message = "Invalid corner orientation.";
+            return result;
+        }
+        cornerOrientationSum += value;
+    }
+    if (cornerOrientationSum % 3 != 0) {
+        result.message = "Corner orientation sum is invalid.";
+        return result;
+    }
 
-bool CubeState::IsSolved() const {
-    return reducedHistory_.empty();
-}
+    int edgeOrientationSum = 0;
+    for (int value : state.eo) {
+        if (value < 0 || value > 1) {
+            result.message = "Invalid edge orientation.";
+            return result;
+        }
+        edgeOrientationSum += value;
+    }
+    if (edgeOrientationSum % 2 != 0) {
+        result.message = "Edge orientation sum is invalid.";
+        return result;
+    }
 
-const MoveSequence& CubeState::ReducedHistory() const {
-    return reducedHistory_;
+    if (PermutationParity(state.cp) != PermutationParity(state.ep)) {
+        result.message = "Corner/edge permutation parity mismatch.";
+        return result;
+    }
+
+    result.valid = true;
+    result.message = "Cube state is valid.";
+    return result;
 }
 
 } // namespace cube
