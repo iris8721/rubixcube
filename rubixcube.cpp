@@ -644,6 +644,7 @@ std::optional<int> PickStickerIndex(const CubeModel& cubeModel, const Camera3D& 
 
     for (int i = 0; i < static_cast<int>(cubeModel.stickers.size()); i++) {
         const Sticker& sticker = cubeModel.stickers[i];
+        if (Vector3DotProduct(sticker.offset, ray.direction) >= 0.0f) continue;
         StickerQuad quad = BuildStickerQuad(sticker, MatrixIdentity());
 
         RayCollision hitA = GetRayCollisionTriangle(ray, quad.v1, quad.v2, quad.v3);
