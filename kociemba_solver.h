@@ -78,6 +78,7 @@ private:
     static void BuildPruneTables(Tables& tables);
     static bool LoadPruneCache(Tables& tables, std::string& errorMessage);
     static bool SavePruneCache(const Tables& tables, std::string& errorMessage);
+    static std::uint32_t HashTables(const Tables& tables);
 
     static bool SearchPhase2(
         const Tables& tables,

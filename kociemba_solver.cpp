@@ -16,7 +16,7 @@ constexpr std::array<int, 13> kFactorial{
     1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800, 39916800, 479001600
 };
 
-constexpr std::uint32_t kCacheVersion = 3;
+constexpr std::uint32_t kCacheVersion = 4;
 constexpr const char* kCacheMagic = "KOCIEMBA_CACHE";
 constexpr const char* kCacheFileName = "kociemba_cache.bin";
 
@@ -33,6 +33,7 @@ struct CacheHeader {
     std::uint32_t phase1FlipSliceSize = 0;
     std::uint32_t phase2CornerSliceSize = 0;
     std::uint32_t phase2EdgeSliceSize = 0;
+    std::uint32_t checksum = 0;
 };
 
 struct TableInitStats {
@@ -80,6 +81,22 @@ bool WriteBytes(std::ofstream& out, const void* data, std::size_t size) {
 bool ReadBytes(std::ifstream& in, void* data, std::size_t size) {
     in.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(size));
     return in.good();
+}
+
+std::uint32_t HashBytes(std::uint32_t hash, const void* data, std::size_t size) {
+    const unsigned char* bytes = static_cast<const unsigned char*>(data);
+    std::size_t i = 0;
+    for (; i + 4 <= size; i += 4) {
+        std::uint32_t word;
+        std::memcpy(&word, bytes + i, 4);
+        hash = (hash ^ word) * 0x9E3779B1u;
+        hash ^= hash >> 15;
+    }
+    for (; i < size; i++) {
+        hash = (hash ^ bytes[i]) * 0x9E3779B1u;
+        hash ^= hash >> 15;
+    }
+    return hash;
 }
 
 } // namespace
@@ -757,6 +774,11 @@ bool KociembaSolver::LoadPruneCache(Tables& tables, std::string& errorMessage) {
         return false;
     }
 
+    if (HashTables(tables) != header.checksum) {
+        errorMessage = "cache checksum mismatch";
+        return false;
+    }
+
     return true;
 }
 
@@ -781,6 +803,7 @@ bool KociembaSolver::SavePruneCache(const Tables& tables, std::string& errorMess
     header.phase1FlipSliceSize = static_cast<std::uint32_t>(tables.phase1FlipSlicePrune.size());
     header.phase2CornerSliceSize = static_cast<std::uint32_t>(tables.phase2CornerSlicePrune.size());
     header.phase2EdgeSliceSize = static_cast<std::uint32_t>(tables.phase2EdgeSlicePrune.size());
+    header.checksum = HashTables(tables);
 
     if (!WriteBytes(out, &header, sizeof(header))) {
         errorMessage = "cache header write failed";
@@ -828,6 +851,21 @@ bool KociembaSolver::SavePruneCache(const Tables& tables, std::string& errorMess
     }
 
     return out.good();
+}
+
+std::uint32_t KociembaSolver::HashTables(const Tables& tables) {
+    std::uint32_t hash = 0x811C9DC5u;
+    hash = HashBytes(hash, tables.twistMove.data(), sizeof(tables.twistMove));
+    hash = HashBytes(hash, tables.flipMove.data(), sizeof(tables.flipMove));
+    hash = HashBytes(hash, tables.sliceMove.data(), sizeof(tables.sliceMove));
+    hash = HashBytes(hash, tables.cornerPermMove.data(), sizeof(tables.cornerPermMove));
+    hash = HashBytes(hash, tables.udEdgePermMove.data(), sizeof(tables.udEdgePermMove));
+    hash = HashBytes(hash, tables.slicePermMove.data(), sizeof(tables.slicePermMove));
+    hash = HashBytes(hash, tables.phase1TwistSlicePrune.data(), tables.phase1TwistSlicePrune.size());
+    hash = HashBytes(hash, tables.phase1FlipSlicePrune.data(), tables.phase1FlipSlicePrune.size());
+    hash = HashBytes(hash, tables.phase2CornerSlicePrune.data(), tables.phase2CornerSlicePrune.size());
+    hash = HashBytes(hash, tables.phase2EdgeSlicePrune.data(), tables.phase2EdgeSlicePrune.size());
+    return hash;
 }
 
 bool KociembaSolver::SearchPhase2(
